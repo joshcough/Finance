@@ -202,14 +202,27 @@ bigPriceTable r = tabular bigPriceLegend $ r # {datefld, aaplClose, hpqClose, gl
 -- run the table in javafx
 goBigPriceTable = go bigPriceTable bigR
 
+-- join in a caluclation to a relation. 
+-- todo: document this. 
+joinCalc initVField initV outputField calc r =
+  r ** (relation [{initVField = initV}]) |> [| outputField = calc initValue |]
 
--- ======= show a stock with its cumulative return ======= --
+-- add in the cumulative return for a stock, given its initial value
 field initValue, cumRet: Double
-withCumRet f initialRelation =  
-  scanRelation initialRelation $ ts -> f $
-    relation ts |>
-    (r -> r ** (relation [{initValue = (head ts) ! open}])) |> 
-    [| cumRet = adjClose *_Op initValue |] 
+joinCumRet initV = joinCalc initValue initV cumRet (x -> adjClose /_Op x) 
 
-goAaplTableWithCumRet = go (withCumRet historyTable) aapl
+-- add in the total value of current holdings, given an initial holding amount.
+field holdings, initialInvestment: Double 
+-- f is Relation -> Report, r is Relation
+joinTotalValue initV = joinCalc initialInvestment initV holdings (x -> cumRet *_Op x)
+
+showAllDataForStock f initialInvestmentValue historicalData =  
+  scanRelation historicalData $ ts -> f $ 
+    (relation ts) |> 
+    (joinCumRet ((head ts) ! open)) |>
+    (joinTotalValue initialInvestmentValue)
+
+
+initialAaplInvest = 350000.0
+goAaplTableWithCumRet = go (showAllDataForStock historyTable initialAaplInvest) aapl
 

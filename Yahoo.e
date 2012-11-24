@@ -213,7 +213,6 @@ joinCumRet initV = joinCalc initValue initV cumRet (x -> adjClose /_Op x)
 
 -- add in the total value of current holdings, given an initial holding amount.
 field holdings, initialInvestment: Double 
--- f is Relation -> Report, r is Relation
 joinTotalValue initV = joinCalc initialInvestment initV holdings (x -> cumRet *_Op x)
 
 showAllDataForStock f initialInvestmentValue historicalData =  

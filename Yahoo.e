@@ -19,6 +19,7 @@ import String as String
 import Layout.Report
 import Environment.Home
 import Syntax.IO
+import Relation
 import Syntax.Relation
 import Layout.Format as Fmt
 import Relation.Op as Op
@@ -60,10 +61,15 @@ readData tupReader fetchContents = (readDataTups . reverse . drop 1) <$> fetchCo
   readDataTups ls = mmap relation $ 
     sequence listTraversable maybeMonad (lmap tupReader ls) 
 
+-- todo: define infix operator for this
+joinIOM2Rs        = combineIoMaybe (r1 -> r2 -> r1 ** r2)
+joinIOM3Rs r      = joinIOM2Rs . (joinIOM2Rs r)
+joinIOM4Rs r1 r2  = joinIOM2Rs . (joinIOM3Rs r1 r2)
+renameIOMR iomr f = iomr |> ioMaybeMap (rename adjClose f)
+
 go = display . (maybe $ text "parse error") where display f i = i >>= (javaFX . f)
 
 -- ========= Yahoo Code ========= --
-
 
 pad2 s = if (length_String s == 1) ("0" ++_String s) s
 yahooBaseURL = "http://ichart.finance.yahoo.com/table.csv?"
@@ -79,8 +85,7 @@ yahooURL sym startDate endDate =
 -- TODO: add flag for daily, monthly, yearly, etc
 yahooString sym startDate endDate = readURL $ yahooURL sym startDate endDate
 yahoo startDate endDate sym = readHistoryFromURL $ yahooURL sym startDate endDate
-yahoo2011 = yahoo @2011/01/03 @2011/01/04
-
+yahoo2011 = yahoo @2011/01/01 @2011/12/31
 
 -- ========= Classwork below ========== --
 
@@ -166,12 +171,13 @@ put all of this in a table. it seems a little much to have every day,
 but whatever, its ok.
 --}
 
-field aaplClose, hpqClose, gldClose, spyClose : Double
+-- pull the daily historical data from yahoo for 2011 for 4 stocks
 aapl = yahoo2011 "AAPL" 
 hpq  = yahoo2011 "HPQ" 
 gld  = yahoo2011 "GLD"
 spy  = yahoo2011 "SPY"
 
+-- some quick tests to verify sanity --
 goAaplString = yahooString "AAPL" @2012/10/22 @2012/11/22
 goAaplChart = go historyChart aapl
 goAaplTable = go priceTable   aapl
@@ -185,29 +191,25 @@ goGldTable  = go priceTable   gld
 goSpyChart  = go historyChart spy
 goSpyTable  = go priceTable   spy
 
--- todo: define infix operator for this
-combineRs = combineIoMaybe (r1 -> r2 -> r1 ** r2)
-renameIomr iomr f = iomr |> ioMaybeMap (rename adjClose f)
-bigR = (combineRs (renameIomr aapl aaplClose) 
-       (combineRs (renameIomr hpq  hpqClose) 
-       (combineRs (renameIomr gld  gldClose) 
-                  (renameIomr spy spyClose))))
-
+-- ========== put together a table with the closing prices for all the stocks ========= --
+field aaplClose, hpqClose, gldClose, spyClose : Double
+bigR = joinIOM4Rs (rn aapl aaplClose) (rn hpq hpqClose) (rn gld gldClose) (rn spy spyClose)
+ where rn = renameIOMR
+bigPriceTable r = tabular bigPriceLegend $ r # {datefld, aaplClose, hpqClose, gldClose, spyClose} 
+  where bigPriceLegend  = Just [ (datefld, "Date") ^ 0, 
+    (aaplClose, "AAPL") ^ 10, (hpqClose, "HPQ") ^ 10, (gldClose, "GLD") ^ 10, (spyClose, "SPY") ^ 10
+  ]_Sorted_Lg
+-- run the table in javafx
 goBigPriceTable = go bigPriceTable bigR
-bigPriceTable r = tabular Nothing $ traceShow 
-  (topK {datefld} 20 $ r # {datefld, aaplClose, hpqClose, gldClose, spyClose})
-bigPriceLegend  = Just [
-  (datefld,   "Date") ^ 0, 
-  (aaplClose, "AAPL") ^ 10, 
-  (hpqClose,  "HPQ")  ^ 10, 
-  (gldClose,  "GLD")  ^ 10, 
-  (spyClose,  "SPY")  ^ 10
-]_Sorted_Lg
 
---let 
---  startValue = (head ts) ! open
---  xxxxx = (col_Op adjClose) /_Op startValue in
---tabular priceLegend $ (relation ts) # {datefld, adjClose}
---field cumRet: Double
---examples/ClassicClarifi/PAReportHTML.e:337:myAgg = sum_Agg ((col_Op characteristicValue) *_Op (col_Op weightValue))
---examples/ClassicClarifi/Preloaded/PAData.e:310:myAgg = sum_Agg (characteristicValue *_Op weightValue)
+
+-- ======= show a stock with its cumulative return ======= --
+field initValue, cumRet: Double
+withCumRet f initialRelation =  
+  scanRelation initialRelation $ ts -> f $
+    relation ts |>
+    (r -> r ** (relation [{initValue = (head ts) ! open}])) |> 
+    [| cumRet = adjClose *_Op initValue |] 
+
+goAaplTableWithCumRet = go (withCumRet historyTable) aapl
+

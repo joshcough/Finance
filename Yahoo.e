@@ -18,7 +18,7 @@ import File
 import String as String
 import Layout.Report
 import Environment.Home
-import Syntax.IO
+import Syntax.Maybe
 import Relation
 import Syntax.Relation
 import Layout.Format as Fmt
@@ -57,7 +57,7 @@ pInt        = parseField (parseInt 10)
 readDataFile tupReader = readData tupReader . readCSVFile
 readDataURL  tupReader = readData tupReader . readCSVURL
 
-readData tupReader fetchContents = (readDataTups . reverse . drop 1) <$> fetchContents where
+readData tupReader fetchContents = iomap (readDataTups . reverse . drop 1) fetchContents where
   readDataTups ls = mmap relation $ 
     sequence listTraversable maybeMonad (lmap tupReader ls) 
 
@@ -67,7 +67,7 @@ joinIOM3Rs r      = joinIOM2Rs . (joinIOM2Rs r)
 joinIOM4Rs r1 r2  = joinIOM2Rs . (joinIOM3Rs r1 r2)
 renameIOMR iomr f = iomr |> ioMaybeMap (rename adjClose f)
 
-go = display . (maybe $ text "parse error") where display f i = i >>= (javaFX . f)
+go = display . (maybe $ text "parse error") where display f i = iobind i (javaFX . f)
 
 -- ========= Yahoo Code ========= --
 
@@ -83,8 +83,8 @@ yahooEndDate   = yahooDate "d" "e" "f"
 yahooURL sym startDate endDate =
   concatStrings [yahooBaseURL, "s=", sym, (yahooStartDate startDate), (yahooEndDate endDate), "&g=d&ignore=.csv"]
 -- TODO: add flag for daily, monthly, yearly, etc
-yahooString sym startDate endDate = readURL $ yahooURL sym startDate endDate
-yahoo startDate endDate sym = readHistoryFromURL $ yahooURL sym startDate endDate
+yahooString sym startDate endDate = readURL (traceShow $ yahooURL sym startDate endDate)
+yahoo startDate endDate sym = readHistoryFromURL (traceShowS "???" $ yahooURL sym startDate endDate)
 yahoo2011 = yahoo @2011/01/01 @2011/12/31
 
 -- ========= Classwork below ========== --
@@ -191,6 +191,29 @@ goGldTable  = go priceTable   gld
 goSpyChart  = go historyChart spy
 goSpyTable  = go priceTable   spy
 
+
+anyYahooStock =
+  prefWH 1000 500 (
+  input String $ symTextField       syms   ->
+  input String $ startDateTextField sDates ->
+  input String $ endDateTextField   eDates ->
+  button "GO"  $ goButton           go     ->
+  vflow [
+    hflow [
+      text "Stock:",      symTextField,
+      text "Start Date:", startDateTextField,
+      text "End Date:",   endDateTextField,
+      goButton
+    ],
+    on go (syms *** sDates *** eDates) $ ((sym, sDate), eDate) ->
+      maybe emptyReport historyChart $
+      (parseDate sDate) >>= (sd -> 
+      (parseDate eDate) >>= (ed ->  
+      (unsafePerformIO $ yahoo sd ed sym)))
+  ])
+
+main = javaFX anyYahooStock
+
 -- ========== put together a table with the closing prices for all the stocks ========= --
 field aaplClose, hpqClose, gldClose, spyClose : Double
 bigR = joinIOM4Rs (rn aapl aaplClose) (rn hpq hpqClose) (rn gld gldClose) (rn spy spyClose)
@@ -205,7 +228,7 @@ goBigPriceTable = go bigPriceTable bigR
 -- join in a caluclation to a relation. 
 -- todo: document this. 
 joinCalc initVField initV outputField calc r =
-  r ** (relation [{initVField = initV}]) |> [| outputField = calc initValue |]
+  r ** (relation [{initVField = initV}]) |> [| outputField = calc initVField |]
 
 -- add in the cumulative return for a stock, given its initial value
 field initValue, cumRet: Double
